@@ -1,0 +1,149 @@
+{
+  "python": "3.14.7",
+  "openssl": "OpenSSL 3.5.7 9 Jun 2026",
+  "geos": "3.13.1",
+  "packages": [
+    {
+      "package": "gdstk",
+      "version": "1.0.1",
+      "files": [
+        "third_party_licenses/gdstk/gdstk-1.0.1.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "package": "matplotlib",
+      "version": "3.11.1",
+      "files": [
+        "third_party_licenses/matplotlib/matplotlib-3.11.1.dist-info/LICENSE",
+        "third_party_licenses/matplotlib/matplotlib/mpl-data/fonts/ttf/LICENSE_DEJAVU",
+        "third_party_licenses/matplotlib/matplotlib/mpl-data/fonts/ttf/LICENSE_STIX"
+      ]
+    },
+    {
+      "package": "numpy",
+      "version": "2.5.1",
+      "files": [
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/LICENSE.txt",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/_core/src/highway/LICENSE",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/ma/LICENSE",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+        "third_party_licenses/numpy/numpy-2.5.1.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md",
+        "third_party_licenses/numpy/numpy/_core/include/numpy/random/LICENSE.txt",
+        "third_party_licenses/numpy/numpy/ma/LICENSE",
+        "third_party_licenses/numpy/numpy/random/LICENSE.md"
+      ]
+    },
+    {
+      "package": "shapely",
+      "version": "2.1.2",
+      "files": [
+        "third_party_licenses/shapely/shapely-2.1.2.dist-info/licenses/LICENSE.txt",
+        "third_party_licenses/shapely/shapely-2.1.2.dist-info/licenses/LICENSE_GEOS",
+        "third_party_licenses/shapely/shapely-2.1.2.dist-info/licenses/LICENSE_win32"
+      ]
+    },
+    {
+      "package": "pyserial",
+      "version": "3.5",
+      "files": [
+        "third_party_licenses/pyserial/LICENSE.txt"
+      ]
+    },
+    {
+      "package": "Pillow",
+      "version": "12.3.0",
+      "files": [
+        "third_party_licenses/Pillow/pillow-12.3.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "package": "contourpy",
+      "version": "1.3.3",
+      "files": [
+        "third_party_licenses/contourpy/contourpy-1.3.3.dist-info/LICENSE"
+      ]
+    },
+    {
+      "package": "cycler",
+      "version": "0.12.1",
+      "files": [
+        "third_party_licenses/cycler/cycler-0.12.1.dist-info/LICENSE"
+      ]
+    },
+    {
+      "package": "fonttools",
+      "version": "4.63.0",
+      "files": [
+        "third_party_licenses/fonttools/fonttools-4.63.0.dist-info/licenses/LICENSE",
+        "third_party_licenses/fonttools/fonttools-4.63.0.dist-info/licenses/LICENSE.external"
+      ]
+    },
+    {
+      "package": "kiwisolver",
+      "version": "1.5.0",
+      "files": [
+        "third_party_licenses/kiwisolver/kiwisolver-1.5.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "package": "packaging",
+      "version": "26.3",
+      "files": [
+        "third_party_licenses/packaging/packaging-26.3.dist-info/licenses/LICENSE",
+        "third_party_licenses/packaging/packaging-26.3.dist-info/licenses/LICENSE.APACHE",
+        "third_party_licenses/packaging/packaging-26.3.dist-info/licenses/LICENSE.BSD"
+      ]
+    },
+    {
+      "package": "pyparsing",
+      "version": "3.3.2",
+      "files": [
+        "third_party_licenses/pyparsing/pyparsing-3.3.2.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "package": "python-dateutil",
+      "version": "2.9.0.post0",
+      "files": [
+        "third_party_licenses/python-dateutil/python_dateutil-2.9.0.post0.dist-info/LICENSE"
+      ]
+    },
+    {
+      "package": "six",
+      "version": "1.17.0",
+      "files": [
+        "third_party_licenses/six/six-1.17.0.dist-info/LICENSE"
+      ]
+    },
+    {
+      "package": "PyInstaller",
+      "version": "6.22.3",
+      "files": [
+        "third_party_licenses/PyInstaller/pyinstaller-6.22.3.dist-info/licenses/COPYING.txt"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "file": "geos-3.13.1.tar.bz2",
+      "url": "https://download.osgeo.org/geos/geos-3.13.1.tar.bz2",
+      "sha256": "df2c50503295f325e7c8d7b783aca8ba4773919cde984193850cf9e361dfd28c"
+    },
+    {
+      "file": "shapely-2.1.2.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/4d/bc/0989043118a27cccb4e906a46b7565ce36ca7b57f5a18b78f4f1b0f72d9d/shapely-2.1.2.tar.gz",
+      "sha256": "2ed4ecb28320a433db18a5bf029986aa8afcfd740745e78847e330d5d94922a9"
+    }
+  ]
+}
