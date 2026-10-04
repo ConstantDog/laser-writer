@@ -3,6 +3,11 @@
 An English-language desktop application for converting GDS polygons into
 laser exposure paths and sending reviewed G-code to a FluidNC controller.
 
+**[User guide: workflow, every editable parameter, and its effect on writing](docs/USER_GUIDE.md)**
+
+The guide covers the v1.4.1 interface, measured width versus hatch spacing,
+microsteps and firmware settings, manual controls, and optional periodic homing.
+
 ## Run
 
 On Windows 10/11 x64, extract the release archive and open `Laser Writer Open.exe`.
