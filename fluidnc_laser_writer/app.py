@@ -24,6 +24,7 @@ from .core import (
     GdsDocument,
     LayerInfo,
     PathSettings,
+    add_exposure_coverage,
     analyze_gcode,
     build_gcode,
     generate_serpentine_plan,
@@ -52,8 +53,8 @@ _PARAMETER_ENGLISH = {
     "min_feature_um": "Minimum feature",
     "min_spacing_um": "Minimum spacing",
     "precision_um": "Target precision",
-    "hatch_um": "Hatch spacing",
-    "spot_um": "Simulated spot",
+    "hatch_um": "Maximum hatch spacing",
+    "spot_um": "Measured writing width",
     "x_steps": "X steps/mm",
     "y_steps": "Y steps/mm",
     "feed": "Feed",
@@ -61,6 +62,7 @@ _PARAMETER_ENGLISH = {
     "power": "Laser power",
     "max_power": "Maximum laser power",
     "overscan": "Overscan",
+    "x_backlash_um": "X bidirectional compensation",
     "settle_ms": "Row settle time",
     "machine_x": "X travel",
     "machine_y": "Y travel",
@@ -132,6 +134,7 @@ class LaserWriterApp:
             "power": tk.StringVar(value="500"),
             "max_power": tk.StringVar(value="1000"),
             "overscan": tk.StringVar(value="0.200"),
+            "x_backlash_um": tk.StringVar(value="0"),
             "settle_ms": tk.StringVar(value="20"),
             "machine_x": tk.StringVar(value="100"),
             "machine_y": tk.StringVar(value="100"),
@@ -409,10 +412,12 @@ class LaserWriterApp:
                 "A · Writing commands",
                 "Regenerate G-code after changes.",
                 [
-                    ("Hatch spacing/µm", "hatch_um"),
+                    ("Measured writing width/µm", "spot_um"),
+                    ("Maximum hatch spacing/µm", "hatch_um"),
                     ("Feed≤10/mm/min", "feed"),
                     ("Laser output S", "power"),
                     ("Overscan/mm", "overscan"),
+                    ("X bidirectional compensation/µm [-100,100]", "x_backlash_um"),
                     ("Row dwell/ms", "settle_ms"),
                 ],
             ),
@@ -445,11 +450,6 @@ class LaserWriterApp:
                     ("Y validation travel/mm", "machine_y"),
                 ],
             ),
-            (
-                "E · Preview only",
-                "Display only; does not change the laser spot.",
-                [("Simulated spot/µm", "spot_um")],
-            ),
         ]
         for title, description, fields in groups:
             frame = ttk.LabelFrame(content, text=title, padding=8)
@@ -464,6 +464,23 @@ class LaserWriterApp:
                 )
                 ttk.Entry(frame, textvariable=self.param_vars[key], width=14).grid(
                     row=row, column=1, sticky="ew", pady=3
+                )
+            if any((key == "x_backlash_um" for _, key in fields)):
+                ttk.Label(
+                    frame,
+                    text="Positive shifts right-to-left exposure left; negative shifts it right. Forward unchanged. 0 = off; writing only. Regenerate after changes.",
+                    wraplength=480,
+                    foreground="#555555",
+                ).grid(
+                    row=len(fields) + 1, column=0, columnspan=2, sticky="w", pady=(5, 0)
+                )
+                ttk.Label(
+                    frame,
+                    text="Width sets Y edge inset and preview, not focus. Spacing may shrink to fit. Overlap adds dose; test first.",
+                    wraplength=480,
+                    foreground="#555555",
+                ).grid(
+                    row=len(fields) + 2, column=0, columnspan=2, sticky="w", pady=(5, 0)
                 )
         note = "Exposure and dark travel use the same feed. Homing rates are set in FluidNC."
         ttk.Label(
@@ -826,6 +843,8 @@ class LaserWriterApp:
             raise ValueError(f"{english_label} must be numeric.") from exc
         if not math.isfinite(value):
             raise ValueError("Parameter must be finite.")
+        if key == "x_backlash_um" and (not -100 <= value <= 100):
+            raise ValueError("X compensation must be within [-100, 100] um.")
         if key == "jog_feed" and (not 0.001 <= value <= 100):
             raise ValueError(f"{english_label} must be in [0.001, 100].")
         if key in {"feed", "acceleration"} and (not 0.001 <= value <= 10):
@@ -860,12 +879,15 @@ class LaserWriterApp:
     def _path_settings(self) -> PathSettings:
         return PathSettings(
             hatch_spacing_mm=self._float("hatch_um", "Hatch spacing") / 1000.0,
-            laser_spot_mm=self._float("spot_um", "Preview spot") / 1000.0,
+            laser_spot_mm=self._float("spot_um", "Measured writing width") / 1000.0,
             feed_mm_min=self._float("feed", "Feed"),
             acceleration_mm_s2=self._float("acceleration", "Acceleration"),
             laser_power=self._int("power", "Laser output"),
             max_laser_power=self._int("max_power", "Maximum laser output", minimum=1),
             overscan_mm=self._float("overscan", "overscan", positive=False),
+            x_backlash_um=self._float(
+                "x_backlash_um", "X bidirectional compensation", positive=False
+            ),
             row_settle_ms=self._int("settle_ms", "Row dwell"),
             x_steps_per_mm=self._float("x_steps", "X steps/mm"),
             y_steps_per_mm=self._float("y_steps", "Y steps/mm"),
@@ -889,6 +911,7 @@ class LaserWriterApp:
             settings.laser_power,
             settings.max_laser_power,
             settings.overscan_mm,
+            settings.x_backlash_um,
             settings.row_settle_ms,
             self._float("machine_x", "X travel"),
             self._float("machine_y", "Y travel"),
@@ -1103,6 +1126,8 @@ class LaserWriterApp:
         except Exception as exc:
             show_check_failure(self.root, "Validation setting error", str(exc))
             return False
+        if self.generated_program and self.generated_program.path_plan:
+            analysis.warnings.extend(self.generated_program.path_plan.warnings)
         issue_lines = [f"{'Error'}：{item}" for item in analysis.errors]
         issue_lines.extend((f"{'Warning'}：{item}" for item in analysis.warnings))
         if not issue_lines:
@@ -1188,21 +1213,12 @@ class LaserWriterApp:
     ) -> None:
         self.axis.clear()
         travel = []
-        burn = []
-        burn_colors = []
-        max_power = max(
-            (segment.power for segment in program.analysis.segments), default=1.0
-        )
         for segment in program.analysis.segments:
             points = [
                 (segment.start_x_mm, segment.start_y_mm),
                 (segment.end_x_mm, segment.end_y_mm),
             ]
-            if segment.laser_on:
-                burn.append(points)
-                alpha = max(0.3, min(1.0, segment.power / max_power))
-                burn_colors.append((0.88, 0.05, 0.05, alpha))
-            else:
+            if not segment.laser_on:
                 travel.append(points)
         if travel:
             self.axis.add_collection(
@@ -1214,21 +1230,17 @@ class LaserWriterApp:
                     label="Laser-off travel",
                 )
             )
-        if burn:
-            self.axis.add_collection(
-                LineCollection(
-                    burn,
-                    colors=burn_colors,
-                    linewidths=0.8,
-                    alpha=0.95,
-                    label="Exposure path",
-                )
-            )
+        width = (
+            program.path_plan.exposure_width_mm
+            if program.path_plan
+            else self._float("spot_um", "Measured writing width") / 1000.0
+        )
+        add_exposure_coverage(self.axis, program.analysis.segments, width)
         if self.current_geometry is not None and program.path_plan is not None:
             shifted = affinity.translate(
                 self.current_geometry,
                 xoff=program.path_plan.design_x_offset_mm,
-                yoff=0.0,
+                yoff=-program.path_plan.source_geometry.bounds[1],
             )
             self._plot_geometry_outline(shifted)
         self.axis.autoscale()
@@ -1236,7 +1248,9 @@ class LaserWriterApp:
         self.axis.set_aspect("equal", adjustable="box")
         self.axis.set_xlabel("X / mm")
         self.axis.set_ylabel("Y / mm")
-        self.axis.set_title("Planned path (not measured motion)")
+        self.axis.set_title(
+            f"Geometric exposure coverage · width {width * 1000:g} um (not measured/dose)"
+        )
         self.axis.grid(True, linewidth=0.3, alpha=0.4)
         (self._accepted_artist,) = self.axis.plot(
             [],
@@ -1274,7 +1288,7 @@ class LaserWriterApp:
         self.simulation_summary_var.set(
             program.analysis.summary_text()
             + "｜"
-            + "red=exposure, blue=off, orange=accepted, dot=FluidNC position"
+            + "red=estimated coverage, darker overlap is not dose; black=target; blue=off"
         )
 
     def _plot_geometry_outline(self, geometry) -> None:

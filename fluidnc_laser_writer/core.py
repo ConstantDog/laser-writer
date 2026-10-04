@@ -16,7 +16,7 @@ from shapely.geometry import (
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 EPSILON_MM = 1e-08
 
 
@@ -111,8 +111,24 @@ class PathSettings:
     x_steps_per_mm: float = 200.0
     y_steps_per_mm: float = 200.0
     return_to_origin: bool = False
+    x_backlash_um: float = 0.0
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("Measured writing width", self.laser_spot_mm),
+            ("Maximum hatch spacing", self.hatch_spacing_mm),
+            ("X steps/mm", self.x_steps_per_mm),
+            ("Y steps/mm", self.y_steps_per_mm),
+        ):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and greater than zero.")
+        if (
+            not math.isfinite(self.x_backlash_um)
+            or not -100 <= self.x_backlash_um <= 100
+        ):
+            raise ValueError(
+                "X bidirectional compensation must be finite and within [-100, 100] um."
+            )
         for name, value in (
             ("Feed/mm/min", self.feed_mm_min),
             ("Acceleration/mm/s²", self.acceleration_mm_s2),
@@ -146,6 +162,8 @@ class PathPlan:
     design_height_mm: float
     design_x_offset_mm: float
     source_geometry: Any
+    exposure_width_mm: float = 0.04
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -486,6 +504,34 @@ def _merge_intervals(
     return merged
 
 
+def _coverage_row_ticks(
+    low: float, high: float, origin: float, settings: PathSettings
+) -> list[int]:
+    """Y center rows, inset by half a measured width, on the controller grid.
+
+    The maximum gap is bounded in integer steps, so rounding cannot create
+    a larger gap. The inset positions can differ by at most half a Y step.
+    """
+    width = settings.laser_spot_mm
+    scale = settings.y_steps_per_mm
+    if high - low <= width + EPSILON_MM:
+        return [round(((low + high) / 2 - origin) * scale)]
+    first = round((low + width / 2 - origin) * scale)
+    last = round((high - width / 2 - origin) * scale)
+    max_ticks = math.floor(min(settings.hatch_spacing_mm, width) * scale + 1e-09)
+    if max_ticks < 1:
+        raise ValueError(
+            "Y step exceeds writing width or maximum hatch spacing; check actual steps/mm."
+        )
+    span = last - first
+    if span <= 0:
+        return [first]
+    intervals = math.ceil(span / max_ticks)
+    if intervals > 200000:
+        raise ValueError("Too many scan rows; check writing-width and hatch units.")
+    return [first + round(i * span / intervals) for i in range(intervals + 1)]
+
+
 def generate_serpentine_plan(geometry: Any, settings: PathSettings) -> PathPlan:
     if geometry.is_empty:
         raise ValueError(
@@ -509,20 +555,52 @@ def generate_serpentine_plan(geometry: Any, settings: PathSettings) -> PathPlan:
     x_offset = _quantize(settings.overscan_mm - min_x, settings.x_steps_per_mm)
     line_left = min_x - max(1.0, settings.overscan_mm + 0.1)
     line_right = max_x + max(1.0, settings.overscan_mm + 0.1)
-    row_count = int(math.floor(design_height / settings.hatch_spacing_mm + 0.5)) + 1
     rows: list[ScanRow] = []
-    seen_y: set[float] = set()
+    warnings: list[str] = []
     x_step = 1.0 / settings.x_steps_per_mm
-    for raw_index in range(row_count):
-        source_y = min_y + raw_index * settings.hatch_spacing_mm
-        if source_y > max_y + settings.hatch_spacing_mm * 0.5:
-            break
-        output_y = _quantize(source_y - min_y, settings.y_steps_per_mm)
-        if output_y in seen_y:
-            continue
-        seen_y.add(output_y)
-        scan_line = LineString([(line_left, source_y), (line_right, source_y)])
-        raw_intervals = _extract_intervals(geometry.intersection(scan_line))
+    reverse_shift = -_quantize(settings.x_backlash_um / 1000.0, settings.x_steps_per_mm)
+    if (
+        settings.x_backlash_um
+        and abs(reverse_shift) + settings.theoretical_accel_distance_mm
+        > settings.overscan_mm + EPSILON_MM
+    ):
+        raise ValueError(
+            "X compensation plus acceleration distance exceeds overscan; increase overscan or reduce compensation."
+        )
+    if settings.hatch_spacing_mm > settings.laser_spot_mm + EPSILON_MM:
+        warnings.append(
+            "Maximum hatch exceeds measured width; actual spacing is reduced to at most that width. Recheck exposure dose."
+        )
+    intervals_by_tick: dict[int, list[tuple[float, float]]] = {}
+    components = extract_polygon_components(geometry)
+    for component in components:
+        low, high = (component.bounds[1], component.bounds[3])
+        if high - low < settings.laser_spot_mm - EPSILON_MM:
+            warnings.append(
+                "A component is narrower than the writing width in Y: one centered row may overrun the target."
+            )
+        if (
+            component.interiors
+            or abs(component.area - component.envelope.area) > EPSILON_MM**2
+        ):
+            warnings.append(
+                "Nonrectangular/holed components use their top/bottom bounds; sloped edges, holes and thin branches may have gaps or overrun. Inspect coverage against outlines."
+            )
+        for tick in _coverage_row_ticks(low, high, min_y, settings):
+            source_y = min_y + tick / settings.y_steps_per_mm
+            if source_y < low - EPSILON_MM or source_y > high + EPSILON_MM:
+                raise ValueError(
+                    "Y quantization puts a row outside a thin component; check steps/mm and geometry."
+                )
+            source_y = min(high, max(low, source_y))
+            scan_line = LineString([(line_left, source_y), (line_right, source_y)])
+            raw = _extract_intervals(component.intersection(scan_line))
+            if raw:
+                intervals_by_tick.setdefault(tick, []).extend(raw)
+        if len(intervals_by_tick) > 200000:
+            raise ValueError("Too many scan rows; check parameters.")
+    for tick, raw_intervals in sorted(intervals_by_tick.items()):
+        output_y = tick / settings.y_steps_per_mm
         shifted = [
             (
                 _quantize(start + x_offset, settings.x_steps_per_mm),
@@ -538,10 +616,24 @@ def generate_serpentine_plan(geometry: Any, settings: PathSettings) -> PathPlan:
         ]
         if not intervals:
             continue
+        left_to_right = len(rows) % 2 == 0
+        if not left_to_right and reverse_shift:
+            intervals = [
+                (start + reverse_shift, end + reverse_shift) for start, end in intervals
+            ]
+            if any(
+                (
+                    start < left - EPSILON_MM or end > right + EPSILON_MM
+                    for start, end in intervals
+                )
+            ):
+                raise ValueError(
+                    "Compensated exposure exceeds scan bounds; increase overscan."
+                )
         rows.append(
             ScanRow(
                 y_mm=output_y,
-                left_to_right=len(rows) % 2 == 0,
+                left_to_right=left_to_right,
                 exposure_intervals=tuple(intervals),
             )
         )
@@ -559,6 +651,8 @@ def generate_serpentine_plan(geometry: Any, settings: PathSettings) -> PathPlan:
         design_height_mm=design_height,
         design_x_offset_mm=x_offset,
         source_geometry=geometry,
+        exposure_width_mm=settings.laser_spot_mm,
+        warnings=list(dict.fromkeys(warnings)),
     )
 
 
@@ -597,6 +691,9 @@ def build_gcode(
         f"; Layer/Datatype: {layer_info.layer}/{layer_info.datatype}",
         f"; Design size: {plan.design_width_mm:.4f} x {plan.design_height_mm:.4f} mm",
         f"; Hatch spacing: {settings.hatch_spacing_mm:.4f} mm",
+        f"; Measured writing width: {settings.laser_spot_mm:.4f} mm",
+        "; Hatch policy: maximum spacing; center rows inset half-width and evenly redistributed per component",
+        "; Coverage is geometric, not an optical-dose or developed-linewidth prediction",
         f"; Feed: {settings.feed_mm_min:.3f} mm/min",
         f"; Laser power: {settings.laser_power}/{settings.max_laser_power}",
         f"; Overscan: {settings.overscan_mm:.4f} mm",
@@ -616,6 +713,15 @@ def build_gcode(
             f"G1 X{_fmt_coord(end)} Y{_fmt_coord(y)} F{_fmt_feed(settings.feed_mm_min)} S0"
         )
 
+    if settings.x_backlash_um:
+        shift_um = (
+            -_quantize(settings.x_backlash_um / 1000.0, settings.x_steps_per_mm)
+            * 1000.0
+        )
+        lines.insert(
+            0,
+            f"; X bidirectional compensation: {settings.x_backlash_um:+.4f} um; reverse exposure X shift: {shift_um:+.4f} um (step-quantized); forward unchanged",
+        )
     for row_number, row in enumerate(plan.rows, 1):
         start_x = plan.left_mm if row.left_to_right else plan.right_mm
         end_x = plan.right_mm if row.left_to_right else plan.left_mm
@@ -667,6 +773,7 @@ def build_gcode(
             + "\n"
             + "\n".join(analysis.errors)
         )
+    analysis.warnings.extend(plan.warnings)
     return GCodeProgram(lines=lines, analysis=analysis, path_plan=plan)
 
 
@@ -876,6 +983,37 @@ def analyze_gcode(
     )
 
 
+def exposure_footprints(
+    segments: Sequence[MotionSegment], width_mm: float
+) -> list[Polygon]:
+    """Circular-spot swept areas in machine mm, not screen/print points."""
+    if not math.isfinite(width_mm) or width_mm <= 0:
+        raise ValueError("Exposure width must be finite and greater than zero.")
+    return [
+        LineString([(s.start_x_mm, s.start_y_mm), (s.end_x_mm, s.end_y_mm)]).buffer(
+            width_mm / 2.0, quad_segs=8
+        )
+        for s in segments
+        if s.laser_on and s.length_mm > EPSILON_MM
+    ]
+
+
+def add_exposure_coverage(axis, segments: Sequence[MotionSegment], width_mm: float):
+    from matplotlib.collections import PolyCollection
+
+    footprints = exposure_footprints(segments, width_mm)
+    if not footprints:
+        return None
+    collection = PolyCollection(
+        [list(p.exterior.coords) for p in footprints],
+        facecolors=(0.88, 0.05, 0.05, 0.38),
+        edgecolors="none",
+        label="Exposure coverage (darker overlap, not dose)",
+    )
+    axis.add_collection(collection)
+    return collection
+
+
 def save_simulation_png(
     program: GCodeProgram, path: str | Path, laser_spot_mm: float
 ) -> Path:
@@ -904,21 +1042,26 @@ def save_simulation_png(
         axis.add_collection(
             LineCollection(travel, colors="#6a93b8", linewidths=0.25, alpha=0.35)
         )
-    if burn:
-        max_power = max(powers) if powers else 1.0
-        colors = [
-            (0.85, 0.05, 0.05, max(0.25, min(1.0, value / max_power)))
-            for value in powers
-        ]
-        linewidth_points = max(0.35, laser_spot_mm * 72.0 / 25.4)
-        axis.add_collection(
-            LineCollection(burn, colors=colors, linewidths=linewidth_points, alpha=0.9)
+    width = program.path_plan.exposure_width_mm if program.path_plan else laser_spot_mm
+    add_exposure_coverage(axis, program.analysis.segments, width)
+    if program.path_plan:
+        from shapely import affinity
+
+        plan = program.path_plan
+        outline = affinity.translate(
+            plan.source_geometry,
+            xoff=plan.design_x_offset_mm,
+            yoff=-plan.source_geometry.bounds[1],
         )
+        for polygon in extract_polygon_components(outline):
+            axis.plot(*polygon.exterior.xy, color="#222222", linewidth=0.5)
+            for ring in polygon.interiors:
+                axis.plot(*ring.xy, color="#222222", linewidth=0.5)
     axis.autoscale()
     axis.set_aspect("equal", adjustable="box")
     axis.set_xlabel("X / mm")
     axis.set_ylabel("Y / mm")
-    axis.set_title("FluidNC G-code Simulation (red=laser on, blue=laser off)")
+    axis.set_title(f"Geometric exposure coverage · width {width * 1000:g} um")
     axis.grid(True, linewidth=0.3, alpha=0.4)
     fig.tight_layout()
     fig.savefig(output)

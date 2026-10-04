@@ -3,9 +3,14 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 import traceback
+import sys
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        from fluidnc_laser_writer.release_self_test import run
+
+        raise SystemExit(run(sys.argv[2]))
     root = tk.Tk()
     root.withdraw()
     loading = tk.Toplevel(root)
